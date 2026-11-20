@@ -129,7 +129,7 @@ class DrawerView(
             MotionEvent.ACTION_DOWN -> { downY = ev.y; downX = ev.x; pulling = false }
             MotionEvent.ACTION_MOVE -> {
                 val dy = ev.y - downY
-                if (dy > slop * 2 && abs(dy) > abs(ev.x - downX) * 1.5f && !recycler.canScrollVertically(-1)) {
+                if (dy > slop && abs(dy) > abs(ev.x - downX) && !recycler.canScrollVertically(-1)) {
                     pulling = true
                     return true
                 }
