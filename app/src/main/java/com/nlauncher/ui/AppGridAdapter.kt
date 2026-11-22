@@ -9,6 +9,7 @@ class AppGridAdapter(
     private val itemHeight: () -> Int,
     private val itemWidth: () -> Int = { ViewGroup.LayoutParams.MATCH_PARENT },
     private val showLabels: () -> Boolean = { true },
+    private val labelColor: () -> Int? = { null },
     private val onClick: (AppInfo, IconView) -> Unit,
     private val onLongClick: (AppInfo, IconView) -> Boolean,
 ) : RecyclerView.Adapter<AppGridAdapter.VH>() {
@@ -38,7 +39,8 @@ class AppGridAdapter(
         lp.height = itemHeight()
         lp.width = itemWidth()
         v.layoutParams = lp
-        v.icon = app.icon
+        v.icon = Look.icon(app.key, app.icon)
+        v.labelColorOverride = labelColor()
         v.label = app.label
         v.showLabel = showLabels()
         v.setOnClickListener { onClick(app, v) }

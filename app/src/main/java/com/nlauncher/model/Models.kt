@@ -177,6 +177,7 @@ class Workspace(
     val pages: MutableList<Page> = mutableListOf(),
     var settings: Settings = Settings(),
     private var nextId: Long = 1,
+    var theme: Theme = Theme(),
 ) {
     fun newId(): Long = nextId++
 
@@ -239,6 +240,7 @@ class Workspace(
         put("version", 1)
         put("nextId", nextId)
         put("settings", settings.toJson())
+        put("theme", theme.toJson())
         put("pages", JSONArray().also { a -> pages.forEach { a.put(it.toJson()) } })
     }
 
@@ -251,7 +253,7 @@ class Workspace(
                 maxId = maxOf(maxId, p.id)
                 p.items.forEach { maxId = maxOf(maxId, it.id) }
             }
-            val ws = Workspace(pages, Settings.fromJson(o.optJSONObject("settings")), maxOf(o.optLong("nextId", 1), maxId + 1))
+            val ws = Workspace(pages, Settings.fromJson(o.optJSONObject("settings")), maxOf(o.optLong("nextId", 1), maxId + 1), Theme.fromJson(o.optJSONObject("theme")))
             ws.normalize()
             return ws
         }

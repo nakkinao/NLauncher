@@ -33,6 +33,7 @@ class FolderView(context: Context, private val cb: Callbacks) : FrameLayout(cont
     }
 
     private val card: LinearLayout
+    private val footerButtons = mutableListOf<TextView>()
     private val title: EditText
     private val recycler: RecyclerView
     private val adapter: AppGridAdapter
@@ -43,18 +44,17 @@ class FolderView(context: Context, private val cb: Callbacks) : FrameLayout(cont
     private var dragView: View? = null
 
     val isOpen: Boolean get() = visibility == View.VISIBLE
+    var onProgress: ((Float) -> Unit)? = null
 
     init {
-        setBackgroundColor(0x88000000.toInt())
+        setBackgroundColor(0x55000000)
         isClickable = true
         setOnClickListener { close() }
 
         card = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            background = roundedBg(0xF0202028.toInt(), 28)
-            setPadding(12.dp, 14.dp, 12.dp, 10.dp)
+            setPadding(12.dp, 16.dp, 12.dp, 10.dp)
             isClickable = true
-            elevation = 12f.dp
         }
         title = EditText(context).apply {
             setTextColor(Color.WHITE)
@@ -77,7 +77,8 @@ class FolderView(context: Context, private val cb: Callbacks) : FrameLayout(cont
         card.addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         adapter = AppGridAdapter(
-            itemHeight = { 88.dp },
+            itemHeight = { 90.dp },
+            labelColor = { Look.textOn(Look.theme.folderColor, Look.theme.folderAlpha) },
             onClick = { app, v -> cb.onFolderAppClick(app, v) },
             onLongClick = { _, _ -> false },
         )
@@ -156,15 +157,31 @@ class FolderView(context: Context, private val cb: Callbacks) : FrameLayout(cont
         visibility = View.GONE
     }
 
+    fun applyTheme() {
+        val t = Look.theme
+        card.background = Look.glass(t.folderColor, t.folderAlpha, t.folderRadius, 18)
+        val fg = Look.textOn(t.folderColor, t.folderAlpha)
+        title.setTextColor(fg)
+        title.setHintTextColor(Look.subTextOn(t.folderColor, t.folderAlpha))
+        footerButtons.forEach {
+            it.setTextColor(t.accent)
+            it.background = roundedBg(Look.withAlpha(t.accent, 14), 18)
+        }
+        adapter.notifyDataSetChanged()
+    }
+
     private fun footerButton(text: String, onClick: (View) -> Unit): TextView = TextView(context).apply {
+        footerButtons += this
         this.text = text
         setTextColor(0xFFDDE3FF.toInt())
         textSize = 14f
         gravity = Gravity.CENTER
         setPadding(14.dp, 10.dp, 14.dp, 10.dp)
-        selectable(context)
         setOnClickListener { onClick(it) }
-        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            marginStart = 4.dp; marginEnd = 4.dp
+        }
     }
 
     private fun commitTitle() {
@@ -180,6 +197,7 @@ class FolderView(context: Context, private val cb: Callbacks) : FrameLayout(cont
     }
 
     fun bind(name: String, apps: List<AppInfo>, columns: Int) {
+        applyTheme()
         if (!title.hasFocus()) title.setText(name)
         list = apps.toMutableList()
         layoutManager.spanCount = columns.coerceIn(3, 5)
@@ -190,16 +208,17 @@ class FolderView(context: Context, private val cb: Callbacks) : FrameLayout(cont
         visibility = View.VISIBLE
         alpha = 0f
         card.scaleX = 0.9f; card.scaleY = 0.9f
-        animate().alpha(1f).setDuration(160).start()
-        card.animate().scaleX(1f).scaleY(1f).setDuration(200).start()
+        animate().alpha(1f).setDuration(180).setUpdateListener { onProgress?.invoke(it.animatedFraction) }.start()
+        card.animate().scaleX(1f).scaleY(1f).setInterpolator(android.view.animation.OvershootInterpolator(1.2f)).setDuration(260).start()
     }
 
     fun close() {
         if (!isOpen) return
         if (title.hasFocus()) commitTitle()
         hideKeyboard()
-        animate().alpha(0f).setDuration(140).withEndAction {
+        animate().alpha(0f).setDuration(160).setUpdateListener { onProgress?.invoke(1f - it.animatedFraction) }.withEndAction {
             visibility = View.GONE
+            onProgress?.invoke(0f)
             cb.onFolderClosed()
         }.start()
     }

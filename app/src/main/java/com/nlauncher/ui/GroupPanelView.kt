@@ -36,7 +36,6 @@ class GroupPanelView(
 
     init {
         orientation = VERTICAL
-        background = roundedBg(0x33000000, 20, 0x22FFFFFF)
         setPadding(6.dp, 4.dp, 6.dp, 4.dp)
 
         header = LinearLayout(context).apply {
@@ -62,6 +61,7 @@ class GroupPanelView(
             itemHeight = { panelItemHeight() },
             itemWidth = { panelItemWidth() },
             showLabels = { labels },
+            labelColor = { panelText() },
             onClick = onAppClick,
             onLongClick = onAppLongClick,
         )
@@ -79,6 +79,20 @@ class GroupPanelView(
         addView(recycler, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
     }
 
+    private fun panelText(): Int? {
+        val t = Look.theme
+        return if (Look.isLight(t.panelColor) && t.panelAlpha >= 35) Look.textOn(t.panelColor, t.panelAlpha) else null
+    }
+
+    private fun applyTheme() {
+        val t = Look.theme
+        background = Look.glass(t.panelColor, t.panelAlpha, t.panelRadius, t.panelBorder)
+        title.setTextColor(panelText() ?: t.labelColor)
+        title.typeface = Look.typeface(t.labelFont)
+        if (t.labelShadow && panelText() == null) title.setShadowLayer(3f, 0f, 1f, 0xAA000000.toInt())
+        else title.setShadowLayer(0f, 0f, 0f, 0)
+    }
+
     private fun panelItemHeight(): Int {
         if (horizontal) {
             val rows = layoutManager.spanCount.coerceAtLeast(1)
@@ -93,6 +107,7 @@ class GroupPanelView(
     }
 
     fun bind(group: Group, apps: List<AppInfo>, icon: android.graphics.Bitmap) {
+        applyTheme()
         title.text = group.name
         iconView.setImageBitmap(icon)
         horizontal = group.scrollHorizontal

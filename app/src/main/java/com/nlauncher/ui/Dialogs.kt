@@ -108,7 +108,7 @@ fun showAppPicker(
         .setView(root)
         .setPositiveButton("OK") { _, _ -> onDone(selected.toList()) }
         .setNegativeButton("キャンセル", null)
-        .show()
+        .showStyled()
 }
 
 fun showTextInput(activity: Activity, title: String, initial: String, onDone: (String) -> Unit) {
@@ -126,7 +126,7 @@ fun showTextInput(activity: Activity, title: String, initial: String, onDone: (S
         .setView(wrap)
         .setPositiveButton("OK") { _, _ -> onDone(et.text.toString().trim()) }
         .setNegativeButton("キャンセル", null)
-        .show()
+        .showStyled()
 }
 
 /**
@@ -242,7 +242,7 @@ class GroupIconEditor(
             .setView(scroll)
             .setPositiveButton("保存") { _, _ -> onSave(icon) }
             .setNegativeButton("キャンセル", null)
-            .show()
+            .showStyled()
     }
 
     fun setImage(path: String) {
@@ -337,5 +337,5 @@ fun showSettingsDialog(activity: Activity, settings: Settings, onDone: (Settings
         .setView(ScrollView(activity).apply { addView(root) })
         .setPositiveButton("OK") { _, _ -> onDone(s) }
         .setNegativeButton("キャンセル", null)
-        .show()
+        .showStyled()
 }

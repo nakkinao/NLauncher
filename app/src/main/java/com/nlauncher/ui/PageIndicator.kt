@@ -18,7 +18,7 @@ class PageIndicator(context: Context) : View(context) {
     var onPageTap: ((Int) -> Unit)? = null
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val spacing = 14f.dp
+    private val spacing = 20f.dp
     private val radius = 3f.dp
 
     override fun onDraw(canvas: Canvas) {
@@ -26,11 +26,16 @@ class PageIndicator(context: Context) : View(context) {
         val total = spacing * (count - 1)
         val start = width / 2f - total / 2f
         val cy = height / 2f
+        val accent = Look.theme.accent
         for (i in 0 until count) {
             val d = min(1f, abs(progress - i))
-            paint.color = 0xFFFFFFFF.toInt()
-            paint.alpha = (255 * (1f - 0.6f * d)).toInt()
-            canvas.drawCircle(start + i * spacing, cy, radius * (1.5f - 0.5f * d), paint)
+            val active = 1f - d
+            // アクティブなページは横長のピル型 + アクセントカラー
+            val half = radius + active * 6f.dp
+            paint.color = Look.blend(0xFFFFFFFF.toInt(), accent, active)
+            paint.alpha = (255 * (0.45f + 0.55f * active)).toInt()
+            val cx = start + i * spacing
+            canvas.drawRoundRect(cx - half, cy - radius, cx + half, cy + radius, radius, radius, paint)
         }
     }
 

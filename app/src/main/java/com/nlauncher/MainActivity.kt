@@ -42,6 +42,17 @@ import com.nlauncher.model.HomeItem
 import com.nlauncher.model.ItemType
 import com.nlauncher.model.Page
 import com.nlauncher.model.Workspace
+import com.nlauncher.model.Theme
+import com.nlauncher.model.IconShape
+import com.nlauncher.model.IconStyle
+import com.nlauncher.model.Settings
+import com.nlauncher.ui.GlassMenu
+import com.nlauncher.ui.Look
+import com.nlauncher.ui.SettingsSheet
+import com.nlauncher.ui.showStyled
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.view.WindowManager
 import com.nlauncher.ui.CellLayout
 import com.nlauncher.ui.DragLayer
 import com.nlauncher.ui.DrawerView
@@ -59,7 +70,6 @@ import com.nlauncher.ui.dp
 import com.nlauncher.ui.roundedBg
 import com.nlauncher.ui.selectableBorderless
 import com.nlauncher.ui.showAppPicker
-import com.nlauncher.ui.showSettingsDialog
 import com.nlauncher.ui.showTextInput
 import java.io.File
 import java.io.FileOutputStream
@@ -67,7 +77,7 @@ import kotlin.math.ceil
 import kotlin.math.hypot
 import kotlin.math.min
 
-class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks {
+class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks, SettingsSheet.Host {
 
     private lateinit var store: WorkspaceStore
     private lateinit var ws: Workspace
@@ -90,6 +100,12 @@ class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks {
     private var openFolderItem: HomeItem? = null
     private var resizeFrame: ResizeFrame? = null
     private var iconEditor: GroupIconEditor? = null
+    private var settingsSheet: SettingsSheet? = null
+    private var glassMenu: GlassMenu? = null
+    private lateinit var handle: TextView
+    private var drawerP = 0f
+    private var folderP = 0f
+    private var currentBlur = -1
 
     private var pendingWidgetId = -1
     private var pendingCell: Point? = null
@@ -106,6 +122,7 @@ class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks {
         firstRun = loaded == null
         ws = loaded ?: Workspace().also { it.pages += it.newPage(); it.pages += it.newPage() }
         if (ws.pages.isEmpty()) ws.pages += ws.newPage()
+        Look.theme = ws.theme
 
         awm = AppWidgetManager.getInstance(this)
         host = LauncherWidgetHost(applicationContext, HOST_ID)
@@ -126,6 +143,7 @@ class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks {
         apps.addListener { onAppsChanged() }
         apps.reload()
         renderAll()
+        updateBackdrop()
         workspace.setPageImmediate(savedInstanceState?.getInt("page", 0) ?: 0)
     }
 
@@ -162,6 +180,8 @@ class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks {
 
     private fun closeOverlays(): Boolean {
         var closed = false
+        glassMenu?.let { it.dismiss(); closed = true }
+        settingsSheet?.let { it.finish(); closed = true }
         resizeFrame?.let { finishResize(); closed = true }
         if (folder.isOpen) { folder.close(); closed = true }
         if (drawer.isOpen) { drawer.close(); closed = true }
@@ -181,7 +201,7 @@ class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks {
         indicator = PageIndicator(this)
         content.addView(indicator, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 22.dp))
 
-        val handle = TextView(this).apply {
+        handle = TextView(this).apply {
             text = "︿"
             setTextColor(Color.WHITE)
             textSize = 18f
@@ -196,14 +216,16 @@ class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks {
         dragLayer.addView(content, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         drawer = DrawerView(
-            this, ws.settings.drawerCols, { true },
+            this, ws.settings.drawerCols,
             onAppClick = { app, v -> apps.launch(app.key, v); main.postDelayed({ drawer.close(false) }, 300) },
             onAppLongClick = { app, v -> startDrawerDrag(app, v); true },
         )
         drawer.onCloseRequest = { drawer.close() }
+        drawer.onProgress = { drawerP = it; updateBackdrop() }
         dragLayer.addView(drawer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         folder = FolderView(this, this)
+        folder.onProgress = { folderP = it; updateBackdrop() }
         dragLayer.addView(folder, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         setContentView(dragLayer)
@@ -281,7 +303,7 @@ class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks {
             ItemType.APP -> {
                 val app = apps.get(item.app)
                 IconView(this).apply {
-                    icon = app?.icon ?: packageManager.defaultActivityIcon
+                    icon = app?.let { Look.icon(it.key, it.icon) } ?: packageManager.defaultActivityIcon
                     label = app?.label ?: ""
                     showLabel = labels
                     dimmed = app == null && apps.loaded
@@ -317,7 +339,7 @@ class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks {
 
     private fun groupApps(g: Group): List<AppInfo> = g.apps.mapNotNull { apps.get(it) }
 
-    private fun groupIcons(g: Group): List<Drawable> = groupApps(g).take(9).map { it.icon }
+    private fun groupIcons(g: Group): List<Drawable> = groupApps(g).take(9).map { Look.icon(it.key, it.icon) }
 
     private fun groupBitmap(g: Group, size: Int): Bitmap = IconFactory.render(g.icon, g, groupIcons(g), size)
 
@@ -566,10 +588,10 @@ class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks {
     // ---------------------------------------------------------------- menus
 
     private fun menu(title: String?, entries: List<Pair<String, () -> Unit>>) {
-        val b = AlertDialog.Builder(this)
-        if (title != null) b.setTitle(title)
-        b.setItems(entries.map { it.first }.toTypedArray()) { _, which -> entries[which].second() }
-        b.show()
+        glassMenu?.dismiss()
+        val m = GlassMenu(this, title, entries, dragLayer.lastX, dragLayer.lastY) { glassMenu = null }
+        glassMenu = m
+        m.show(dragLayer)
     }
 
     private fun showHomeMenu() {
@@ -578,6 +600,7 @@ class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks {
         lastLongPressCell = null
         val cur = workspace.currentPage
         val entries = mutableListOf<Pair<String, () -> Unit>>(
+            "デザイン・設定" to { openSettings() },
             "ウィジェットを追加" to { pickWidget(cell) },
             "グループを作成" to { createGroup(cell) },
             "ページを追加" to {
@@ -595,15 +618,6 @@ class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks {
             try {
                 startActivity(Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "壁紙を選択"))
             } catch (e: Exception) { toast("壁紙アプリが見つかりません") }
-        }
-        entries += "設定" to {
-            showSettingsDialog(this, ws.settings) { s ->
-                ws.settings = s
-                ws.normalize()
-                drawer.setColumns(s.drawerCols)
-                save()
-                renderAll()
-            }
         }
         menu("ページ ${cur + 1} / ${ws.pages.size}", entries)
     }
@@ -632,7 +646,7 @@ class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks {
             .setMessage("このページのアイテム（${page.items.size}個）も削除されます。よろしいですか？")
             .setPositiveButton("削除") { _, _ -> doDelete() }
             .setNegativeButton("キャンセル", null)
-            .show()
+            .showStyled()
     }
 
     private fun createGroup(cell: Point?, initial: List<String> = emptyList()) {
@@ -705,7 +719,7 @@ class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks {
                 .setMessage("「${g.name}」を削除しますか？（アプリ自体は削除されません）")
                 .setPositiveButton("削除") { _, _ -> deleteItem(item) }
                 .setNegativeButton("キャンセル", null)
-                .show()
+                .showStyled()
             Unit
         }
         menu(g.name, entries)
@@ -720,7 +734,7 @@ class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks {
         openFolder(gi)
     }
 
-    private fun setGroupMode(item: HomeItem, mode: GroupMode) {
+    private fun setGroupMode(item: HomeItem, mode: GroupMode, quiet: Boolean = false) {
         val g = item.group ?: return
         val page = ws.pageOf(item) ?: return
         val cols = ws.settings.cols
@@ -742,8 +756,9 @@ class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks {
                 }
             }
             if (!done) { item.w = 1; item.h = 1 }
-            if (item.w * item.h == 1) toast("空きが少ないため 1×1 で表示しています。サイズ変更で広げられます")
+            if (!quiet && item.w * item.h == 1) toast("空きが少ないため 1×1 で表示しています。サイズ変更で広げられます")
         }
+        if (quiet) return
         save(); renderAll()
         if (folder.isOpen) folder.close()
     }
@@ -1207,6 +1222,122 @@ class MainActivity : Activity(), DragLayer.DragHandler, FolderView.Callbacks {
         save()
         renderAll()
         openAfter?.let { openFolder(it) }
+    }
+
+    // ---------------------------------------------------------------- look & settings
+
+    private val blurSupported: Boolean
+        get() = Build.VERSION.SDK_INT >= 31 && windowManager.isCrossWindowBlurEnabled
+
+    /** 壁紙のぼかし・暗さと、ドロワー/グループを開いた時の背景演出 */
+    private fun updateBackdrop() {
+        val t = Look.theme
+        var blur = t.wallBlur.toFloat()
+        blur += (t.drawerBlur - blur) * drawerP
+        blur += (maxOf(t.folderBlur.toFloat(), blur) - blur) * folderP
+        setWindowBlur(Look.blurPx(blur.toInt()))
+        val extraDim = if (blurSupported) 0f else blur * 0.3f
+        val dim = (t.wallDim + extraDim).coerceIn(0f, 95f)
+        dragLayer.setBackgroundColor(Color.argb((dim / 100f * 255).toInt(), 0, 0, 0))
+        val cover = maxOf(drawerP, folderP * 0.6f)
+        content.alpha = 1f - cover
+        val scale = 1f - 0.05f * maxOf(drawerP, folderP)
+        content.scaleX = scale
+        content.scaleY = scale
+    }
+
+    private fun setWindowBlur(px: Int) {
+        if (Build.VERSION.SDK_INT < 31 || !blurSupported) return
+        if (px == currentBlur) return
+        currentBlur = px
+        val lp = window.attributes
+        if (px > 0) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+            lp.blurBehindRadius = px
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+            lp.blurBehindRadius = 0
+        }
+        window.attributes = lp
+    }
+
+    private val applyLookRunnable = Runnable { applyLook() }
+
+    private fun applyLook() {
+        updateBackdrop()
+        handle.setTextColor(Look.theme.labelColor)
+        drawer.applyTheme()
+        indicator.invalidate()
+        renderAll()
+        refreshFolder()
+    }
+
+    private fun openSettings() {
+        if (settingsSheet != null) return
+        closeOverlays()
+        val sheet = SettingsSheet(this, ws.theme, ws.settings, this)
+        settingsSheet = sheet
+        sheet.open(dragLayer)
+    }
+
+    override fun onThemePreview(theme: Theme) {
+        Look.theme = theme
+        main.removeCallbacks(applyLookRunnable)
+        main.postDelayed(applyLookRunnable, 24)
+    }
+
+    override fun onSettingsDone(theme: Theme, settings: Settings) {
+        settingsSheet = null
+        ws.theme = theme
+        Look.theme = theme
+        val s = ws.settings
+        val gridChanged = s.cols != settings.cols || s.rows != settings.rows
+        ws.settings = settings
+        if (gridChanged) ws.normalize()
+        drawer.setColumns(settings.drawerCols)
+        save()
+        applyLook()
+    }
+
+    override fun onSettingsCancel(original: Theme) {
+        settingsSheet = null
+        Look.theme = ws.theme
+        applyLook()
+    }
+
+    override fun onBulkGroupIcons(shape: IconShape?, style: IconStyle?, bgColor: Int?, bgAlpha: Int?) {
+        val groups = ws.allItems().mapNotNull { it.group }.toList()
+        for (g in groups) {
+            shape?.let { g.icon.shape = it }
+            style?.let { g.icon.style = it }
+            bgColor?.let { g.icon.bgColor = Look.withAlpha(it, bgAlpha ?: 100) }
+        }
+        save(); renderAll()
+        toast("${groups.size}個のグループに適用しました")
+    }
+
+    override fun onBulkGroupMode(panel: Boolean) {
+        val items = ws.allItems().filter { it.type == ItemType.GROUP && it.group != null }.toList()
+        for (it in items) setGroupMode(it, if (panel) GroupMode.PANEL else GroupMode.FOLDER, quiet = true)
+        save(); renderAll()
+        toast("${items.size}個のグループを変更しました")
+    }
+
+    override fun onCopyTheme(theme: Theme) {
+        val cm = getSystemService(ClipboardManager::class.java)
+        cm?.setPrimaryClip(ClipData.newPlainText("NLauncher theme", theme.toJson().toString()))
+        toast("テーマをコピーしました")
+    }
+
+    override fun onPasteTheme(): Theme? {
+        val cm = getSystemService(ClipboardManager::class.java)
+        val text = cm?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
+        return try {
+            Theme.fromJson(org.json.JSONObject(text ?: ""))
+        } catch (e: Exception) {
+            toast("テーマのデータが見つかりません")
+            null
+        }
     }
 
     // ---------------------------------------------------------------- misc

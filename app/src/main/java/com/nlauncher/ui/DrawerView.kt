@@ -1,33 +1,39 @@
 package com.nlauncher.ui
 
 import android.content.Context
-import android.graphics.Color
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
+import android.view.animation.DecelerateInterpolator
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.nlauncher.data.AppInfo
 import kotlin.math.abs
 
-/** 全アプリ一覧（ドロワー） */
+/** 全アプリ一覧（ドロワー）。すりガラスのシート */
 class DrawerView(
     context: Context,
     columns: Int,
-    private val showLabels: () -> Boolean,
     onAppClick: (AppInfo, IconView) -> Unit,
     onAppLongClick: (AppInfo, IconView) -> Boolean,
 ) : FrameLayout(context) {
 
     val search: EditText
     val recycler: RecyclerView
+    private val sheet: LinearLayout
+    private val grabber: View
+    private val searchWrap: LinearLayout
+    private val searchIcon: TextView
+    private val countView: TextView
     private val adapter: AppGridAdapter
     private val layoutManager = GridLayoutManager(context, columns)
     private var all: List<AppInfo> = emptyList()
@@ -36,33 +42,57 @@ class DrawerView(
     private var downX = 0f
     private var pulling = false
     var onCloseRequest: (() -> Unit)? = null
+    /** 開閉の進み具合 0..1（ぼかしの連動用） */
+    var onProgress: ((Float) -> Unit)? = null
 
     val isOpen: Boolean get() = visibility == View.VISIBLE
 
     init {
-        setBackgroundColor(0xF0121216.toInt())
         isClickable = true
-        val col = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        sheet = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 10.dp, 0, 0)
+        }
+        grabber = View(context)
+        sheet.addView(grabber, LinearLayout.LayoutParams(40.dp, 4.dp).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            bottomMargin = 10.dp
+        })
+
+        searchWrap = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(18.dp, 0, 14.dp, 0)
+        }
+        searchIcon = TextView(context).apply {
+            text = "⌕"
+            textSize = 20f
+            setPadding(0, 0, 10.dp, 2.dp)
+        }
+        searchWrap.addView(searchIcon)
         search = EditText(context).apply {
             hint = "アプリを検索"
-            setHintTextColor(0x88FFFFFF.toInt())
-            setTextColor(Color.WHITE)
-            textSize = 16f
+            textSize = 15f
             isSingleLine = true
-            background = roundedBg(0x22FFFFFF, 24)
-            setPadding(18.dp, 10.dp, 18.dp, 10.dp)
+            background = null
+            setPadding(0, 12.dp, 0, 12.dp)
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
                 override fun afterTextChanged(s: Editable?) = filter()
             })
         }
-        col.addView(search, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            setMargins(16.dp, 12.dp, 16.dp, 8.dp)
+        searchWrap.addView(search, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        countView = TextView(context).apply { textSize = 12f }
+        searchWrap.addView(countView)
+        sheet.addView(searchWrap, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            setMargins(16.dp, 4.dp, 16.dp, 10.dp)
         })
+
         adapter = AppGridAdapter(
-            itemHeight = { 92.dp },
+            itemHeight = { 96.dp },
             showLabels = { true },
+            labelColor = { Look.textOn(Look.theme.drawerColor, Look.theme.drawerAlpha) },
             onClick = onAppClick,
             onLongClick = onAppLongClick,
         )
@@ -70,12 +100,29 @@ class DrawerView(
             this.layoutManager = this@DrawerView.layoutManager
             this.adapter = this@DrawerView.adapter
             clipToPadding = false
-            setPadding(8.dp, 0, 8.dp, 16.dp)
-            isVerticalScrollBarEnabled = true
+            setPadding(8.dp, 0, 8.dp, 24.dp)
+            isVerticalFadingEdgeEnabled = true
+            setFadingEdgeLength(24.dp)
         }
-        col.addView(recycler, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        addView(col, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        sheet.addView(recycler, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        addView(sheet, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT).apply { topMargin = 8.dp })
         visibility = View.GONE
+        applyTheme()
+    }
+
+    fun applyTheme() {
+        val t = Look.theme
+        val fg = Look.textOn(t.drawerColor, t.drawerAlpha)
+        val sub = Look.subTextOn(t.drawerColor, t.drawerAlpha)
+        sheet.background = Look.glass(t.drawerColor, t.drawerAlpha, 30, 10, topRadiusOnly = true)
+        grabber.background = roundedBg(Look.withAlpha(fg, 35), 2)
+        val light = Look.isLight(t.drawerColor) && t.drawerAlpha >= 35
+        searchWrap.background = roundedBg(if (light) 0x14000000 else 0x1FFFFFFF, 26, Look.withAlpha(t.accent, 30))
+        searchIcon.setTextColor(t.accent)
+        search.setTextColor(fg)
+        search.setHintTextColor(sub)
+        countView.setTextColor(sub)
+        adapter.notifyDataSetChanged()
     }
 
     fun setColumns(c: Int) {
@@ -89,18 +136,22 @@ class DrawerView(
 
     private fun filter() {
         val q = search.text?.toString()?.trim()?.lowercase().orEmpty()
-        adapter.submit(if (q.isEmpty()) all else all.filter {
+        val list = if (q.isEmpty()) all else all.filter {
             it.label.lowercase().contains(q) || it.component.packageName.lowercase().contains(q)
-        })
+        }
+        countView.text = "${list.size}"
+        adapter.submit(list)
     }
 
     fun open() {
         if (isOpen) return
         visibility = View.VISIBLE
+        val h = height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
+        sheet.translationY = h * 0.35f
         alpha = 0f
-        translationY = height * 0.15f
-        animate().alpha(1f).translationY(0f).setDuration(220).start()
         recycler.scrollToPosition(0)
+        animate().alpha(1f).setDuration(200).setUpdateListener { onProgress?.invoke(it.animatedFraction) }.start()
+        sheet.animate().translationY(0f).setInterpolator(DecelerateInterpolator(2.2f)).setDuration(320).start()
     }
 
     fun close(animate: Boolean = true) {
@@ -109,12 +160,19 @@ class DrawerView(
         search.setText("")
         if (!animate) {
             visibility = View.GONE
+            onProgress?.invoke(0f)
             return
         }
-        animate().alpha(0f).translationY(height * 0.15f).setDuration(180).withEndAction {
+        val h = height.toFloat()
+        val startAlpha = alpha
+        animate().alpha(0f).setDuration(200).setUpdateListener {
+            onProgress?.invoke(startAlpha * (1f - it.animatedFraction))
+        }.withEndAction {
             visibility = View.GONE
-            translationY = 0f
+            sheet.translationY = 0f
+            onProgress?.invoke(0f)
         }.start()
+        sheet.animate().translationY(h * 0.3f).setDuration(220).start()
     }
 
     fun hideKeyboard() {
@@ -143,15 +201,18 @@ class DrawerView(
             val dy = (event.y - downY).coerceAtLeast(0f)
             when (event.actionMasked) {
                 MotionEvent.ACTION_MOVE -> {
-                    translationY = dy * 0.6f
-                    alpha = 1f - (dy / height.coerceAtLeast(1)).coerceIn(0f, 0.6f)
+                    sheet.translationY = dy * 0.8f
+                    val p = 1f - (dy / height.coerceAtLeast(1)).coerceIn(0f, 0.7f)
+                    alpha = p
+                    onProgress?.invoke(p)
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     pulling = false
-                    if (dy > 120.dp) {
+                    if (dy > 110.dp) {
                         onCloseRequest?.invoke()
                     } else {
-                        animate().translationY(0f).alpha(1f).setDuration(150).start()
+                        sheet.animate().translationY(0f).setDuration(160).start()
+                        animate().alpha(1f).setDuration(160).setUpdateListener { onProgress?.invoke(alpha) }.start()
                     }
                 }
             }
